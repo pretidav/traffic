@@ -1,6 +1,7 @@
 import random 
 import numpy as np
 import matplotlib.pyplot as plt 
+from tqdm import tqdm
 
 class SingleLane():
     def __init__(self, L: int, N: int, p:float = 0.3, bc: str = 'periodic', seed:int = 0, vmax:int = 5):
@@ -111,7 +112,7 @@ if __name__=='__main__':
     
     v = []
     dv = []
-    for n in range(1,N):        
+    for n in tqdm(range(1,N)):        
         lane = SingleLane(L=L,N=n,p=p,vmax=vmax)
         v_mean = []
         for n in range(T):
@@ -123,4 +124,4 @@ if __name__=='__main__':
     plt.errorbar(x=np.array(list(range(1,N)))/L, y=v, yerr=dv, marker='.', linestyle='')
     plt.xlabel('traffic density N/L')
     plt.ylabel('<v>')
-    plt.show()
+    plt.savefig('flow_N{}_L{}_T{}_p{}_vmax{}.png'.format(N,L,T,p,vmax))
