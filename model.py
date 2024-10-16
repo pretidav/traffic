@@ -104,11 +104,11 @@ class SingleLane():
 
                 
 if __name__=='__main__': 
-    N = 500 # tot number of cars
-    L = 1000 # road length
+    N = 100 # tot number of cars
+    L = 500 # road length
     T =  50 # tot duration evolution
-    p = 0.3 # slowing down prob
-    vmax = 100 # max speed allowed
+    p = 0.0 # slowing down prob
+    vmax = 5 # max speed allowed
     
     v = []
     dv = []
