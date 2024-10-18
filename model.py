@@ -17,6 +17,7 @@ class SingleLane():
         self.d = self.distances()
         self.stringx = self.plot(xORv='x')
         self.stringv = self.plot(xORv='v')
+        self.flow = 0
         
     def initialize_xv(self) -> np.array: 
         x = np.random.choice(a=self.L,size=self.N,replace=False)
@@ -84,6 +85,8 @@ class SingleLane():
         tmp = np.zeros_like(self.x)
         for idx in range(self.N):
             tmp[idx]=(self.x[idx]+self.v[idx]) % (self.L)  
+            if (self.x[idx]+self.v[idx]) >= self.L:
+                self.flow+=1
         self.x = tmp
         self.sort()
         self.d = self.distances()
@@ -100,28 +103,46 @@ class SingleLane():
         self.randomization()
         self.car_motion()
         self.update_plot()
-                
+      
 
                 
 if __name__=='__main__': 
-    N = 100 # tot number of cars
-    L = 500 # road length
-    T =  50 # tot duration evolution
-    p = 0.0 # slowing down prob
+    N = 30 # tot number of cars
+    L = 50 # road length
+    T = 400 # tot duration evolution
+    p = 0.2 # slowing down prob
     vmax = 5 # max speed allowed
     
     v = []
     dv = []
+    f = []
+    df = []
     for n in tqdm(range(1,N)):        
         lane = SingleLane(L=L,N=n,p=p,vmax=vmax)
         v_mean = []
+        fp = []
         for n in range(T):
             lane.update()
-            v_mean.append(np.mean(lane.v))
+            v_mean.append(np.mean(lane.v/vmax))
+            fp.append(lane.flow)
         v.append(np.mean(v_mean))
         dv.append(np.std(v_mean)/np.sqrt(T))
-    
-    plt.errorbar(x=np.array(list(range(1,N)))/L, y=v, yerr=dv, marker='.', linestyle='')
-    plt.xlabel('traffic density N/L')
-    plt.ylabel('<v>')
-    plt.savefig('flow_N{}_L{}_T{}_p{}_vmax{}.png'.format(N,L,T,p,vmax))
+        f.append(np.mean(fp))
+        df.append(np.std(fp)/np.sqrt(T))
+        
+        
+    fig, ax1 = plt.subplots()
+    color = 'tab:red'
+    ax1.set_xlabel('traffic density N/L')
+    ax1.set_ylabel('<v/vmax>', color=color)
+    ax1.errorbar(x=np.array(list(range(1,N)))/L, y=v, yerr=dv, marker='.', linestyle='',color=color)
+    ax1.tick_params(axis='y', labelcolor=color)
+
+    ax2 = ax1.twinx()  # instantiate a second Axes that shares the same x-axis
+    color = 'tab:blue'
+    ax2.set_ylabel('<flow>/N', color=color)  # we already handled the x-label with ax1
+    ax2.errorbar(x=np.array(list(range(1,N)))/L, y=f, yerr=df, marker='.', linestyle='',color=color)
+    ax2.tick_params(axis='y', labelcolor=color)
+
+    fig.tight_layout()  # otherwise the right y-label is slightly clipped
+    plt.savefig('traffic_N{}_L{}_T{}_p{}_vmax{}.png'.format(N,L,T,p,vmax))
