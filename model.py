@@ -1,148 +1,188 @@
-import random 
+"""Nagel-Schreckenberg cellular automaton for single-lane freeway traffic.
+
+K. Nagel, M. Schreckenberg, "A cellular automaton model for freeway traffic",
+J. Phys. I France 2 (1992) 2221-2229.
+
+The road has L sites, each empty or occupied by one car with an integer speed 0 <= v <= vmax.
+One update is made of four steps, performed in parallel for all the cars:
+
+    1) acceleration:    if v < vmax and the gap d to the car ahead is larger than v + 1:  v -> v + 1
+    2) slowing down:    if d <= v:                                                         v -> d - 1
+    3) randomization:   with probability p, if v > 0:                                      v -> v - 1
+    4) car motion:      every car advances by v sites.
+
+Here d is the difference between the positions of the car ahead and of the car.
+
+Boundary conditions
+    periodic  the road is a ring (closed system, N cars, constant density rho = N / L).
+    open      the bottleneck of the paper (Sect. 4): when the leftmost site is empty a car with v = 0 is
+              put there, and the cars that reach the rightmost vmax + 1 sites are removed.
+
+Measurements are made with ``measure``: relax (10 L steps as in the paper), then average.
+The flow is q = rho <v>: the number of cars crossing a bond per time step, averaged over the L bonds.
+"""
 import numpy as np
-import matplotlib.pyplot as plt 
-from tqdm import tqdm
 
-class SingleLane():
-    def __init__(self, L: int, N: int, p:float = 0.3, bc: str = 'periodic', seed:int = 0, vmax:int = 5):
-        self.L = L 
-        self.N = N 
-        self.p = p
-        self.allowed_bc = ['periodic','open']
-        self.bc = self.validate_bc(bc=bc)
-        self.seed = seed 
-        self.vmax = vmax
-        random.seed(seed)
-        self.x,self.v  = self.initialize_xv()
-        self.d = self.distances()
-        self.stringx = self.plot(xORv='x')
-        self.stringv = self.plot(xORv='v')
-        self.flow = 0
-        
-    def initialize_xv(self) -> np.array: 
-        x = np.random.choice(a=self.L,size=self.N,replace=False)
-        assert(len(x)==self.N)
-        v = np.random.randint(low=0,high=self.vmax,size=self.N)
-        return np.sort(x),v
 
-    def validate_bc(self,bc:str) -> str:
-        if bc in self.allowed_bc:
-            return bc 
-        else: 
+class SingleLane:
+    def __init__(self, L: int, N: int = 0, p: float = 0.5, bc: str = 'periodic', seed: int = 0, vmax: int = 5):
+        """L sites, N cars at random sites with v = 0, slowing-down probability p (the paper uses p = 0.5).
+
+        For bc='open' N is the initial number of cars (0 is fine), for bc='periodic' it is the constant
+        number of cars.
+        """
+        self.allowed_bc = ['periodic', 'open']
+        if bc not in self.allowed_bc:
             raise KeyError(f"boundary condition bc: '{bc}' not in {self.allowed_bc}")
-        
-    def __repr__(self) -> str:
-        return str(self.__dict__)
-    
-    def pos2idx(self,pos: int) -> int:
-        return np.where(self.x == pos)[0]
-    
-    def plot(self, xORv:'str' = 'x') -> str:
-        pos = '|'
-        for i in range(self.L):
-            if i in self.x and xORv=='x': 
-                pos+='x'
-            elif i in self.x and xORv=='v':
-                j = self.pos2idx(i)
-                pos+=str(self.v[j][0])
-            else: 
-                pos+='-'
-        pos+='|'
-        return pos 
-    
-    def update_plot(self): 
-        self.stringx = self.plot(xORv='x')
-        self.stringv = self.plot(xORv='v')
-    
-    def distances(self) -> np.array: 
-        if self.bc=='periodic':
-            d = []
-            d = np.roll(self.x, shift=-1, axis=0)[:-1] - self.x[:-1]
-            d = np.append(d, self.x[0] + (self.L-self.x[-1]))
-            return np.abs(d)
+        if not 0.0 <= p <= 1.0:
+            raise ValueError("p must be in [0, 1]")
+        if vmax < 1:
+            raise ValueError("vmax must be at least 1")
+        self.L, self.p, self.bc, self.seed, self.vmax = L, p, bc, seed, vmax
+        self.rng = np.random.default_rng(seed)  # one generator, so that the seed makes the run reproducible
+
+        if bc == 'periodic':
+            if not 1 <= N <= L:
+                raise ValueError("periodic road: 1 <= N <= L")
+            self.x = np.sort(self.rng.choice(L, size=N, replace=False))
         else:
-            print('TBD') 
-            exit(1)
-        
-    def acceleration(self): 
-        for pos in list(self.x):
-            idx = self.pos2idx(pos)
-            if self.v[idx] < self.vmax and self.d[idx] > self.v[idx]+1:
-                self.v[idx]+=1
+            if not 0 <= N <= L - (vmax + 1):
+                raise ValueError("open road: 0 <= N <= L - (vmax + 1)")
+            self.x = np.sort(self.rng.choice(L - (vmax + 1), size=N, replace=False))
+        self.v = np.zeros(N, dtype=int)
 
-    def slowing_down(self): 
-        for pos in list(self.x):
-            idx = self.pos2idx(pos)
-            if self.d[idx] <= self.v[idx]:
-                self.v[idx]=self.d[idx]-1
-    
-    def randomization(self): 
-        rnd_slow = np.random.rand(self.N)<self.p
-        self.v = np.where(rnd_slow,self.v-1,self.v)
-        self.v=np.where(self.v>0,self.v,0)
-        
-    def car_motion(self):      
-        tmp = np.zeros_like(self.x)
-        for idx in range(self.N):
-            tmp[idx]=(self.x[idx]+self.v[idx]) % (self.L)  
-            if (self.x[idx]+self.v[idx]) >= self.L:
-                self.flow+=1
-        self.x = tmp
-        self.sort()
-        self.d = self.distances()
-    
-    def sort(self): 
-        idx_sort=np.argsort(self.x)
-        self.x=self.x[idx_sort]
-        self.v=self.v[idx_sort]
-        self.d=self.d[idx_sort]
-        
-    def update(self): 
-        self.acceleration()
-        self.slowing_down()
-        self.randomization()
-        self.car_motion()
-        self.update_plot()
-      
+        self.t = 0  # number of updates done
+        self.flow = 0  # cars that went through the right end: the bond L-1 -> 0 (periodic) or the exit (open)
+        self.last_flow = 0  # the same, in the last update only
+        self.last_inflow = 0  # cars injected in the last update (open road)
 
-                
-if __name__=='__main__': 
-    N = 30 # tot number of cars
-    L = 50 # road length
-    T = 400 # tot duration evolution
-    p = 0.2 # slowing down prob
-    vmax = 5 # max speed allowed
-    
-    v = []
-    dv = []
-    f = []
-    df = []
-    for n in tqdm(range(1,N)):        
-        lane = SingleLane(L=L,N=n,p=p,vmax=vmax)
-        v_mean = []
-        fp = []
-        for n in range(T):
-            lane.update()
-            v_mean.append(np.mean(lane.v/vmax))
-            fp.append(lane.flow)
-        v.append(np.mean(v_mean))
-        dv.append(np.std(v_mean)/np.sqrt(T))
-        f.append(np.mean(fp))
-        df.append(np.std(fp)/np.sqrt(T))
-        
-        
-    fig, ax1 = plt.subplots()
-    color = 'tab:red'
-    ax1.set_xlabel('traffic density N/L')
-    ax1.set_ylabel('<v/vmax>', color=color)
-    ax1.errorbar(x=np.array(list(range(1,N)))/L, y=v, yerr=dv, marker='.', linestyle='',color=color)
-    ax1.tick_params(axis='y', labelcolor=color)
+    # ------------------------------------------------------------------ state
+    @property
+    def N(self) -> int:
+        return len(self.x)
 
-    ax2 = ax1.twinx()  # instantiate a second Axes that shares the same x-axis
-    color = 'tab:blue'
-    ax2.set_ylabel('<flow>/N', color=color)  # we already handled the x-label with ax1
-    ax2.errorbar(x=np.array(list(range(1,N)))/L, y=f, yerr=df, marker='.', linestyle='',color=color)
-    ax2.tick_params(axis='y', labelcolor=color)
+    @property
+    def density(self) -> float:
+        return self.N / self.L
 
-    fig.tight_layout()  # otherwise the right y-label is slightly clipped
-    plt.savefig('traffic_N{}_L{}_T{}_p{}_vmax{}.png'.format(N,L,T,p,vmax))
+    def gaps(self) -> np.ndarray:
+        """Distance d (in sites) from every car to the car ahead. x is sorted."""
+        d = np.empty(self.N, dtype=int)
+        if self.N == 0:
+            return d
+        d[:-1] = self.x[1:] - self.x[:-1]
+        if self.bc == 'periodic':
+            d[-1] = self.x[0] + self.L - self.x[-1]  # the first car is ahead of the last one; alone: d = L
+        else:
+            d[-1] = self.L + self.vmax + 1  # nobody ahead of the last car
+        return d
+
+    distances = gaps  # old name
+
+    # ----------------------------------------------------------------- dynamics
+    def update(self):
+        """One parallel update of the whole road."""
+        n = self.N
+        v = self.v
+        if n > 0:
+            d = self.gaps()
+            v = np.where((v < self.vmax) & (d > v + 1), v + 1, v)  # 1) acceleration
+            v = np.minimum(v, d - 1)  # 2) slowing down
+            slow = self.rng.random(n) < self.p  # 3) randomization
+            v = np.where(slow & (v > 0), v - 1, v)
+        self.v = v
+        x = self.x + v  # 4) car motion
+
+        if self.bc == 'periodic':
+            self.last_flow = int(np.sum(x >= self.L))  # cars that cross the bond L-1 -> 0
+            x = x % self.L
+            order = np.argsort(x)  # the cars never overtake: this is only a rotation of the arrays
+            self.x, self.v = x[order], v[order]
+        else:
+            gone = x >= self.L - (self.vmax + 1)  # absorbing exit: the rightmost vmax + 1 sites
+            self.last_flow = int(np.sum(gone))
+            x, v = x[~gone], v[~gone]
+            self.last_inflow = 0
+            if len(x) == 0 or x[0] > 0:  # the leftmost site is empty: a new car, with v = 0
+                x, v = np.concatenate(([0], x)), np.concatenate(([0], v))
+                self.last_inflow = 1
+            self.x, self.v = x, v
+        self.flow += self.last_flow
+        self.t += 1
+
+    def relax(self, steps: int = None):
+        """Discard the transient. The paper uses 10 L steps."""
+        for _ in range(10 * self.L if steps is None else steps):
+            self.update()
+
+    # ------------------------------------------------------------- measurements
+    def run(self, T: int, profile: bool = False) -> dict:
+        """T updates, recording the time series of what is needed for the averages."""
+        n_t = np.empty(T)  # cars on the road, when the update starts
+        sumv_t = np.empty(T)  # sum of the speeds used in the update
+        out_t = np.empty(T)  # cars through the right end
+        in_t = np.empty(T)  # cars injected
+        occ = np.zeros(self.L) if profile else None
+        for t in range(T):
+            n_t[t] = self.N
+            self.update()
+            sumv_t[t] = self.v.sum()
+            out_t[t], in_t[t] = self.last_flow, self.last_inflow
+            if profile:
+                occ[self.x] += 1
+        return dict(n=n_t, sumv=sumv_t, out=out_t, inflow=in_t, profile=None if occ is None else occ / T)
+
+    def measure(self, T: int = 20000, relax: int = None, blocks: int = 20, profile: bool = False) -> dict:
+        """Relax, then average over T steps. The errors come from the scatter of ``blocks`` block averages
+        (successive time steps are strongly correlated, so sigma / sqrt(T) would be wrong).
+
+        Returns the density rho, the mean speed v (cars and time), the flow q = rho <v>, and for an open
+        road the rates of cars through the exit and injected.
+        """
+        self.relax(relax)
+        r = self.run(T, profile=profile)
+
+        def mean_and_error(series):
+            b = np.array_split(series, blocks)
+            m = np.array([c.mean() for c in b])
+            return float(series.mean()), float(m.std(ddof=1) / np.sqrt(blocks))
+
+        q, dq = mean_and_error(r['sumv'] / self.L)  # cars per bond per step, averaged over the bonds
+        rho, drho = mean_and_error(r['n'] / self.L)
+        ok = r['n'] > 0
+        v, dv = mean_and_error((r['sumv'][ok] / r['n'][ok]))
+        out = dict(rho=rho, drho=drho, v=v, dv=dv, q=q, dq=dq)
+        if self.bc == 'open':
+            out['q_out'], out['dq_out'] = mean_and_error(r['out'])
+            out['q_in'], out['dq_in'] = mean_and_error(r['inflow'])
+            out['profile'] = r['profile']
+        return out
+
+    # ------------------------------------------------------------------ text
+    def row(self, what: str = 'x') -> str:
+        """The road as a string: 'x' marks the cars, 'v' shows their speed (like Figs. 1 and 2 of the paper)."""
+        cells = np.full(self.L, '.', dtype='<U1')
+        cells[self.x] = 'x' if what == 'x' else np.array([str(k) for k in self.v])
+        return '|' + ''.join(cells) + '|'
+
+    @property
+    def stringx(self) -> str:
+        return self.row('x')
+
+    @property
+    def stringv(self) -> str:
+        return self.row('v')
+
+    plot = lambda self, xORv='x': self.row(xORv)  # old name
+
+    def __repr__(self) -> str:
+        return f"SingleLane(L={self.L}, N={self.N}, p={self.p}, bc='{self.bc}', seed={self.seed}, vmax={self.vmax})"
+
+
+if __name__ == '__main__':
+    # a text version of Fig. 2 of the paper: density 0.1, time goes down, the jams move backwards
+    lane = SingleLane(L=70, N=7, p=0.5)
+    lane.relax()
+    for _ in range(33):
+        lane.update()
+        print(lane.stringv)
